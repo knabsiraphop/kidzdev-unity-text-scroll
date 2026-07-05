@@ -1,0 +1,22 @@
+{
+  "name": "com.kidzdev.unity.text-scroll",
+  "version": "0.1.0",
+  "displayName": "KidzDev Unity Text Scroll",
+  "description": "Animated text for uGUI/TMPro: marquee ticker, credits roll, auto-fit overflow scrolling, and typewriter character reveal. Two independent component families, no shared dependency beyond TMPro.",
+  "unity": "6000.0",
+  "author": {
+    "name": "KidzDev"
+  },
+  "dependencies": {
+    "com.cysharp.unitask": "2.5.11",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.textmeshpro": "3.0.6"
+  },
+  "samples": [
+    {
+      "displayName": "Demo",
+      "description": "1920x1080 scene: marquee ticker, credits roll, auto-fit title, and typewriter dialogue box examples. No extra package dependencies beyond TextMeshPro.",
+      "path": "Samples~/Demo"
+    }
+  ]
+}

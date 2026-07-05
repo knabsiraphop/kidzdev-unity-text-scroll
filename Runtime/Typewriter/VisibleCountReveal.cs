@@ -11,5 +11,7 @@ namespace KidzDev.Unity.TextScroll
         public void Prepare(TMP_Text text) => text.ForceMeshUpdate();
 
         public void Apply(TMP_Text text, int visibleCount) => text.maxVisibleCharacters = visibleCount;
+
+        public void Tick(TMP_Text text, float deltaTime) { }
     }
 }

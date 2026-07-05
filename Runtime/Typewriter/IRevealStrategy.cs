@@ -10,5 +10,12 @@ namespace KidzDev.Unity.TextScroll
 
         /// <summary>Make the first <paramref name="visibleCount"/> characters visible.</summary>
         void Apply(TMP_Text text, int visibleCount);
+
+        /// <summary>
+        /// Called every frame while a reveal is playing, after <see cref="Apply"/> — for strategies that
+        /// animate independently of visible-count changes (a fade-in, a scramble/decode effect). No-op for
+        /// strategies that only care about visible count.
+        /// </summary>
+        void Tick(TMP_Text text, float deltaTime);
     }
 }

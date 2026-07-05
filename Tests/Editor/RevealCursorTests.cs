@@ -105,5 +105,25 @@ namespace KidzDev.Unity.TextScroll.Tests
 
             Object.DestroyImmediate(tmp.transform.parent.gameObject);
         }
+
+        [Test]
+        public void SurvivesTextMutation_AfterConstruction()
+        {
+            // A strategy like ScrambleReveal rewrites text.text every frame, which can resize/replace TMP's
+            // internal characterInfo array. RevealCursor must have snapshotted what it needs at construction
+            // time, not held a live reference into that array.
+            var tmp = CreateText("Hello World");
+            var cursor = new RevealCursor(tmp.textInfo, RevealUnit.PerWord, charsPerSecond: 20f, punctuationPause: 0f);
+
+            tmp.text = "X"; // simulate a reveal strategy mutating the live text out from under the cursor
+            tmp.ForceMeshUpdate();
+
+            bool running = true;
+            for (int i = 0; i < 200 && running; i++) running = cursor.Tick(0.05f);
+
+            Assert.IsTrue(cursor.IsComplete);
+            Assert.AreEqual("Hello World".Length, cursor.VisibleCount);
+            Object.DestroyImmediate(tmp.transform.parent.gameObject);
+        }
     }
 }

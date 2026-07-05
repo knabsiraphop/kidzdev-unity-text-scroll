@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using TMPro;
 using UnityEngine;
 
 namespace KidzDev.Unity.TextScroll
@@ -9,11 +10,12 @@ namespace KidzDev.Unity.TextScroll
     /// Position-scrolls a content <see cref="RectTransform"/> inside a masked viewport (put a
     /// <see cref="RectMask2D"/> or <see cref="Mask"/> on the viewport). Delegates per-frame motion to an
     /// <see cref="IScrollBehavior"/> chosen by <see cref="Mode"/>: <see cref="ScrollMode.Marquee"/>,
-    /// <see cref="ScrollMode.Credits"/>, or <see cref="ScrollMode.AutoFit"/>.
+    /// <see cref="ScrollMode.Credits"/>, or <see cref="ScrollMode.AutoFit"/>. Ticked by the shared
+    /// <see cref="TextScrollDriver"/> — costs nothing while not playing.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(RectTransform))]
-    public sealed class TextScroller : MonoBehaviour
+    public sealed class TextScroller : MonoBehaviour, ITickable
     {
         [SerializeField] private RectTransform content;
         [SerializeField] private RectTransform viewport;
@@ -25,18 +27,25 @@ namespace KidzDev.Unity.TextScroll
         [SerializeField] private bool loop;
         [SerializeField] private OverflowBehavior overflowBehavior = OverflowBehavior.PingPong;
         [SerializeField] private bool playOnEnable = true;
+        [SerializeField] private TimeMode timeMode = TimeMode.Scaled;
+        [SerializeField] private bool seamless;
 
         /// <summary>Fires each loop wrap (Marquee), pass end (Credits), or direction change / one-shot end (AutoFit).</summary>
         public event Action OnCycleComplete;
+
+        // Stateless — every TextScroller shares these, so Play() never allocates a behavior instance.
+        private static readonly IScrollBehavior MarqueeBehaviorInstance = new MarqueeBehavior();
+        private static readonly IScrollBehavior CreditsBehaviorInstance = new CreditsBehavior();
+        private static readonly IScrollBehavior AutoFitBehaviorInstance = new AutoFitBehavior();
 
         private readonly ScrollState _state = new();
         private IScrollBehavior _behavior;
         private Vector2 _origin;
         private Vector2 _axisVector;
         private bool _isPlaying;
-        private bool _isPaused;
         private float _delayElapsed;
         private UniTaskCompletionSource _playToEndSource;
+        private RectTransform _seamlessClone;
 
         public ScrollMode Mode { get => mode; set => mode = value; }
         public ScrollAxis Axis { get => axis; set => axis = value; }
@@ -46,7 +55,12 @@ namespace KidzDev.Unity.TextScroll
         public bool Loop { get => loop; set => loop = value; }
         public OverflowBehavior OverflowBehavior { get => overflowBehavior; set => overflowBehavior = value; }
         public bool PlayOnEnable { get => playOnEnable; set => playOnEnable = value; }
+        public TimeMode TimeMode { get => timeMode; set => timeMode = value; }
+        /// <summary>Marquee-only. Runs a second cloned copy of the content one cycle ahead so the ticker never shows a gap.</summary>
+        public bool Seamless { get => seamless; set => seamless = value; }
         public bool IsPlaying => _isPlaying;
+
+        internal IScrollBehavior CurrentBehaviorForTests => _behavior;
 
         private void Reset()
         {
@@ -70,6 +84,8 @@ namespace KidzDev.Unity.TextScroll
         private void OnDisable()
         {
             _isPlaying = false;
+            TextScrollDriver.Unregister(this);
+            DestroySeamlessClone();
             _playToEndSource?.TrySetCanceled();
             _playToEndSource = null;
         }
@@ -79,9 +95,9 @@ namespace KidzDev.Unity.TextScroll
         {
             _behavior = mode switch
             {
-                ScrollMode.Marquee => new MarqueeBehavior(),
-                ScrollMode.Credits => new CreditsBehavior(),
-                ScrollMode.AutoFit => new AutoFitBehavior(),
+                ScrollMode.Marquee => MarqueeBehaviorInstance,
+                ScrollMode.Credits => CreditsBehaviorInstance,
+                ScrollMode.AutoFit => AutoFitBehaviorInstance,
                 _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
             };
 
@@ -96,21 +112,28 @@ namespace KidzDev.Unity.TextScroll
             _axisVector = axis == ScrollAxis.Horizontal ? Vector2.left : Vector2.up;
 
             _behavior.Begin(_state);
+            RebuildSeamlessClone();
             _delayElapsed = 0f;
             _isPlaying = true;
-            _isPaused = false;
             ApplyPosition();
+            TextScrollDriver.Register(this);
         }
 
-        public void Pause() => _isPaused = true;
+        /// <summary>Stops ticking without losing position or state — cheaper than <see cref="Stop"/> for a temporary pause.</summary>
+        public void Pause() => TextScrollDriver.Unregister(this);
 
-        public void Resume() => _isPaused = false;
+        /// <summary>Resumes ticking from wherever <see cref="Pause"/> left off.</summary>
+        public void Resume()
+        {
+            if (_isPlaying) TextScrollDriver.Register(this);
+        }
 
         /// <summary>Halt and reset content back to its origin position.</summary>
         public void Stop()
         {
             _isPlaying = false;
-            _isPaused = false;
+            TextScrollDriver.Unregister(this);
+            DestroySeamlessClone();
             if (content != null) content.anchoredPosition = _origin;
             _playToEndSource?.TrySetCanceled();
             _playToEndSource = null;
@@ -125,20 +148,22 @@ namespace KidzDev.Unity.TextScroll
         {
             if (!_isPlaying) Play();
             _playToEndSource = new UniTaskCompletionSource();
-            return _playToEndSource.Task.AttachExternalCancellation(ct);
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, this.GetCancellationTokenOnDestroy());
+            return _playToEndSource.Task.AttachExternalCancellation(linked.Token);
         }
 
-        private void Update()
+        void ITickable.Tick(float scaledDeltaTime, float unscaledDeltaTime)
         {
-            if (!_isPlaying || _isPaused || _behavior == null) return;
+            if (!_isPlaying || _behavior == null) return;
+            float dt = timeMode == TimeMode.Scaled ? scaledDeltaTime : unscaledDeltaTime;
 
             if (_delayElapsed < startDelay)
             {
-                _delayElapsed += Time.deltaTime;
+                _delayElapsed += dt;
                 return;
             }
 
-            bool running = _behavior.Tick(_state, Time.deltaTime);
+            bool running = _behavior.Tick(_state, dt);
             ApplyPosition();
 
             if (_state.CycleComplete) OnCycleComplete?.Invoke();
@@ -146,6 +171,8 @@ namespace KidzDev.Unity.TextScroll
             if (!running)
             {
                 _isPlaying = false;
+                TextScrollDriver.Unregister(this);
+                DestroySeamlessClone();
                 _playToEndSource?.TrySetResult();
                 _playToEndSource = null;
             }
@@ -154,6 +181,48 @@ namespace KidzDev.Unity.TextScroll
         private void ApplyPosition()
         {
             content.anchoredPosition = _origin + _axisVector * _state.Position;
+
+            if (_seamlessClone != null)
+            {
+                float cycleOffset = _state.ContentSize + _state.Gap;
+                _seamlessClone.anchoredPosition = _origin + _axisVector * (_state.Position - cycleOffset);
+            }
+        }
+
+        private void RebuildSeamlessClone()
+        {
+            DestroySeamlessClone();
+            if (!seamless || mode != ScrollMode.Marquee) return;
+
+            var sourceTmp = content.GetComponent<TMP_Text>();
+            if (sourceTmp == null) return;
+
+            var cloneGo = new GameObject(content.name + " (Seamless Clone)", typeof(RectTransform));
+            var cloneRt = (RectTransform)cloneGo.transform;
+            cloneRt.SetParent(content.parent, false);
+            cloneRt.anchorMin = content.anchorMin;
+            cloneRt.anchorMax = content.anchorMax;
+            cloneRt.pivot = content.pivot;
+            cloneRt.sizeDelta = content.sizeDelta;
+
+            var cloneTmp = cloneGo.AddComponent<TextMeshProUGUI>();
+            cloneTmp.text = sourceTmp.text;
+            cloneTmp.font = sourceTmp.font;
+            cloneTmp.fontSize = sourceTmp.fontSize;
+            cloneTmp.color = sourceTmp.color;
+            cloneTmp.alignment = sourceTmp.alignment;
+            cloneTmp.enableWordWrapping = sourceTmp.enableWordWrapping;
+
+            _seamlessClone = cloneRt;
+        }
+
+        private void DestroySeamlessClone()
+        {
+            if (_seamlessClone == null) return;
+            var go = _seamlessClone.gameObject;
+            _seamlessClone = null;
+            if (Application.isPlaying) Destroy(go);
+            else DestroyImmediate(go);
         }
     }
 }

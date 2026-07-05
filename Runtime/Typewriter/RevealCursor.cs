@@ -11,7 +11,10 @@ namespace KidzDev.Unity.TextScroll
     /// </summary>
     public sealed class RevealCursor
     {
-        private readonly TMP_CharacterInfo[] _chars;
+        // Snapshotted by value at construction, not held as a live reference into TMP's characterInfo array —
+        // some IRevealStrategy implementations (e.g. a scramble/decode effect) rewrite text.text every frame,
+        // which can resize or replace that array out from under a cached reference.
+        private readonly char[] _chars;
         private readonly int _totalVisibleChars;
         private readonly RevealUnit _unit;
         private readonly float _charsPerSecond;
@@ -25,8 +28,9 @@ namespace KidzDev.Unity.TextScroll
 
         public RevealCursor(TMP_TextInfo info, RevealUnit unit, float charsPerSecond, float punctuationPause)
         {
-            _chars = info.characterInfo;
             _totalVisibleChars = info.characterCount;
+            _chars = new char[_totalVisibleChars];
+            for (int i = 0; i < _totalVisibleChars; i++) _chars[i] = info.characterInfo[i].character;
             _unit = unit;
             _charsPerSecond = Mathf.Max(0.01f, charsPerSecond);
             _punctuationPause = Mathf.Max(0f, punctuationPause);
@@ -62,7 +66,7 @@ namespace KidzDev.Unity.TextScroll
             return !IsComplete;
         }
 
-        private char CharAt(int index) => index >= 0 && index < _chars.Length ? _chars[index].character : '\0';
+        private char CharAt(int index) => index >= 0 && index < _chars.Length ? _chars[index] : '\0';
 
         private static bool IsPunctuation(char c) => c is '.' or ',' or '!' or '?' or '…';
 

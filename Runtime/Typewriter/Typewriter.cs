@@ -17,6 +17,7 @@ namespace KidzDev.Unity.TextScroll
     {
         [SerializeField] private TypewriterOptions options = new();
         [SerializeField] private bool playOnEnable;
+        [SerializeField] private TimeMode timeMode = TimeMode.Unscaled;
 
         /// <summary>Fires each time the visible count advances, with the index of the newly revealed character.</summary>
         public event Action<int> OnCharRevealed;
@@ -33,12 +34,12 @@ namespace KidzDev.Unity.TextScroll
         public RevealUnit Unit { get => options.Unit; set => options.Unit = value; }
         public IRevealStrategy RevealStrategy { get => _strategy; set => _strategy = value ?? new VisibleCountReveal(); }
         public bool PlayOnEnable { get => playOnEnable; set => playOnEnable = value; }
+        public TimeMode TimeMode { get => timeMode; set => timeMode = value; }
         public bool IsPlaying => _isPlaying;
 
-        private void Awake()
-        {
-            _text = GetComponent<TMP_Text>();
-        }
+        // Resolved lazily rather than only in Awake() — a public method can be called (e.g. from an editor
+        // tool or another component's Awake) before this component's own Awake has necessarily run.
+        private TMP_Text Text => _text != null ? _text : (_text = GetComponent<TMP_Text>());
 
         private void OnEnable()
         {
@@ -51,7 +52,7 @@ namespace KidzDev.Unity.TextScroll
         /// <summary>Set <paramref name="text"/> on the <see cref="TMP_Text"/>, then reveal it.</summary>
         public UniTask PlayAsync(string text, CancellationToken ct)
         {
-            _text.text = text;
+            Text.text = text;
             return PlayInternalAsync(ct);
         }
 
@@ -68,9 +69,14 @@ namespace KidzDev.Unity.TextScroll
             _internalCts = myCts;
             var linkedCt = myCts.Token;
 
-            _strategy.Prepare(_text);
-            _strategy.Apply(_text, 0);
-            _cursor = new RevealCursor(_text.textInfo, options.Unit, options.CharsPerSecond, options.PunctuationPause);
+            var text = Text;
+
+            // Prepare (may capture state, must not mutate text.text) → construct the cursor from the pristine
+            // TMP character array → only then Apply, since some strategies (ScrambleReveal) rewrite text.text
+            // starting from their first Apply call.
+            _strategy.Prepare(text);
+            _cursor = new RevealCursor(text.textInfo, options.Unit, options.CharsPerSecond, options.PunctuationPause);
+            _strategy.Apply(text, 0);
             _skipRequested = false;
             _isPlaying = true;
             int lastCount = 0;
@@ -81,15 +87,19 @@ namespace KidzDev.Unity.TextScroll
                 {
                     linkedCt.ThrowIfCancellationRequested();
 
+                    float dt = timeMode == TimeMode.Scaled ? Time.deltaTime : Time.unscaledDeltaTime;
+
                     if (_skipRequested) _cursor.Skip();
-                    else _cursor.Tick(Time.unscaledDeltaTime);
+                    else _cursor.Tick(dt);
 
                     if (_cursor.VisibleCount != lastCount)
                     {
                         lastCount = _cursor.VisibleCount;
-                        _strategy.Apply(_text, lastCount);
+                        _strategy.Apply(text, lastCount);
                         OnCharRevealed?.Invoke(lastCount - 1);
                     }
+
+                    _strategy.Tick(text, dt);
 
                     if (_cursor.IsComplete) break;
 

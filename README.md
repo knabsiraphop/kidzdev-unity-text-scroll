@@ -1,11 +1,12 @@
 # KidzDev Unity Text Scroll
 
-Animated text for uGUI/TMPro — four modes, two independent component families:
+Animated text for uGUI/TMPro — five modes, three independent component families:
 
 - **Marquee** — continuously looping horizontal/vertical ticker.
 - **Credits** — one-pass bottom-to-top roll.
 - **Auto-fit** — scrolls only when content overflows its container; stays put otherwise.
 - **Typewriter** — character-by-character reveal, rich-text safe.
+- **Number roller** — count-up / odometer value animation for score and currency labels.
 
 No third-party animation dependency — all motion is per-frame stepping. No coupling to any other KidzDev package.
 
@@ -69,6 +70,23 @@ typewriter.Skip();
 ```
 
 Uses `TMP_Text.maxVisibleCharacters` under the hood — rich-text tags aren't counted as visible characters, so `<b>`, `<color>`, etc. work without any tag parsing. `RevealUnit.PerWord` advances to word boundaries instead of one character at a time.
+
+## `NumberRoller` — animated value label
+
+Add to a `TMP_Text`:
+
+```csharp
+using KidzDev.Unity.TextScroll;
+
+var roller = GetComponent<NumberRoller>();
+roller.Duration = 0.75f;
+roller.Format = "N0";
+
+roller.SetImmediate(1000);                        // no animation
+await roller.AnimateToAsync(2500, cancellationToken);
+```
+
+Calling `AnimateToAsync` mid-roll continues from whatever value is currently showing — it never resets to a fixed start. Formats via `double.ToString(Format)`; easing is `Linear` / `EaseOutQuad` / `EaseOutCubic`, with scaled or unscaled time. It animates a value rather than geometry or character visibility, so it's a standalone sibling of the scroll/reveal families.
 
 ## Substitutable seams
 

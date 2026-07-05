@@ -27,6 +27,7 @@ namespace KidzDev.Unity.TextScroll
         private RevealCursor _cursor;
         private bool _skipRequested;
         private bool _isPlaying;
+        private CancellationTokenSource _internalCts;
 
         public float CharsPerSecond { get => options.CharsPerSecond; set => options.CharsPerSecond = value; }
         public RevealUnit Unit { get => options.Unit; set => options.Unit = value; }
@@ -57,8 +58,16 @@ namespace KidzDev.Unity.TextScroll
         /// <summary>Jump to fully revealed — the current <see cref="PlayAsync(CancellationToken)"/> call completes on its next step.</summary>
         public void Skip() => _skipRequested = true;
 
+        // Calling PlayAsync again while a reveal is already in flight cancels the previous one and starts
+        // fresh, rather than running two loops that fight over the same _cursor.
         private async UniTask PlayInternalAsync(CancellationToken ct)
         {
+            _internalCts?.Cancel();
+            _internalCts?.Dispose();
+            var myCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _internalCts = myCts;
+            var linkedCt = myCts.Token;
+
             _strategy.Prepare(_text);
             _strategy.Apply(_text, 0);
             _cursor = new RevealCursor(_text.textInfo, options.Unit, options.CharsPerSecond, options.PunctuationPause);
@@ -70,7 +79,7 @@ namespace KidzDev.Unity.TextScroll
             {
                 while (true)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    linkedCt.ThrowIfCancellationRequested();
 
                     if (_skipRequested) _cursor.Skip();
                     else _cursor.Tick(Time.unscaledDeltaTime);
@@ -84,15 +93,17 @@ namespace KidzDev.Unity.TextScroll
 
                     if (_cursor.IsComplete) break;
 
-                    await UniTask.Yield(PlayerLoopTiming.Update, ct);
+                    await UniTask.Yield(PlayerLoopTiming.Update, linkedCt);
                 }
             }
             finally
             {
-                _isPlaying = false;
+                // Only the still-current call resets shared state — a superseded call must not stomp on
+                // the newer one that replaced it.
+                if (_internalCts == myCts) _isPlaying = false;
             }
 
-            OnComplete?.Invoke();
+            if (_internalCts == myCts) OnComplete?.Invoke();
         }
     }
 }

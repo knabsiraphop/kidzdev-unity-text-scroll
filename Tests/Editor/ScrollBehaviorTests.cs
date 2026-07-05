@@ -73,31 +73,42 @@ namespace KidzDev.Unity.TextScroll.Tests
         }
 
         [Test]
+        public void Begin_StartsFullyOffScreenOnTheEntrySide()
+        {
+            var state = NewState();
+            var behavior = new MarqueeBehavior();
+            behavior.Begin(state);
+            Assert.AreEqual(-state.ViewportSize, state.Position, 0.001f);
+        }
+
+        [Test]
         public void Tick_WrapsWithoutDrift()
         {
             var state = NewState(speed: 137f, gap: 20f); // an irregular speed to stress the wrap math
             var behavior = new MarqueeBehavior();
             behavior.Begin(state);
-            float wrapDistance = state.ContentSize + state.Gap; // 420
+            float wrapPoint = state.ContentSize + state.Gap; // 420
+            float start = -state.ViewportSize; // -200
 
             for (int i = 0; i < 2000; i++)
             {
                 behavior.Tick(state, 0.1f);
-                Assert.LessOrEqual(state.Position, wrapDistance + 0.001f);
-                Assert.GreaterOrEqual(state.Position, 0f);
+                Assert.LessOrEqual(state.Position, wrapPoint + 0.001f);
+                Assert.GreaterOrEqual(state.Position, start - 0.001f);
             }
         }
 
         [Test]
         public void Tick_FiresCycleCompleteExactlyOnWrap()
         {
-            var state = NewState(speed: 420f, gap: 0f); // wrap distance = contentSize(400) + gap(0) = 400
+            // Full cycle = viewport(200) + content(400) + gap(0) = 600. A 620-unit travel overshoots by 20.
+            var state = NewState(speed: 620f, gap: 0f);
             var behavior = new MarqueeBehavior();
             behavior.Begin(state);
 
-            behavior.Tick(state, 1f); // travels 420 -> wraps once, 20 remainder
+            behavior.Tick(state, 1f);
             Assert.IsTrue(state.CycleComplete);
-            Assert.AreEqual(20f, state.Position, 0.001f);
+            Assert.AreEqual(-180f, state.Position, 0.001f); // -viewport(200) + overshoot(20)
         }
     }
 

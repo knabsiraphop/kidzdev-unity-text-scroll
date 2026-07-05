@@ -57,6 +57,9 @@ namespace KidzDev.Unity.TextScroll
         {
             if (content == null) content = GetComponent<RectTransform>();
             if (viewport == null && transform.parent != null) viewport = transform.parent as RectTransform;
+            // Captured once, here — not in Play() — so repeated Play() calls always return to the same
+            // authored starting position instead of drifting to wherever content currently happens to be.
+            _origin = content.anchoredPosition;
         }
 
         private void OnEnable()
@@ -71,7 +74,7 @@ namespace KidzDev.Unity.TextScroll
             _playToEndSource = null;
         }
 
-        /// <summary>(Re)start scrolling from origin — the content's current anchored position when called.</summary>
+        /// <summary>(Re)start scrolling from origin — the content's authored anchored position at <c>Awake</c>.</summary>
         public void Play()
         {
             _behavior = mode switch
@@ -90,7 +93,6 @@ namespace KidzDev.Unity.TextScroll
             _state.Loop = loop;
             _state.OverflowBehavior = overflowBehavior;
 
-            _origin = content.anchoredPosition;
             _axisVector = axis == ScrollAxis.Horizontal ? Vector2.left : Vector2.up;
 
             _behavior.Begin(_state);

@@ -14,13 +14,13 @@ No third-party animation dependency — all motion is per-frame stepping. No cou
 Open **Package Manager → + → Add package from git URL** and enter:
 
 ```
-https://github.com/knabsiraphop/kidzdev-unity-text-scroll.git#v0.1.0
+https://github.com/knabsiraphop/kidzdev-unity-text-scroll.git#v1.0.0
 ```
 
 Or add to `Packages/manifest.json`:
 
 ```json
-"com.kidzdev.unity.text-scroll": "https://github.com/knabsiraphop/kidzdev-unity-text-scroll.git#v0.1.0"
+"com.kidzdev.unity.text-scroll": "https://github.com/knabsiraphop/kidzdev-unity-text-scroll.git#v1.0.0"
 ```
 
 Requires `com.cysharp.unitask` (OpenUPM), `com.unity.ugui`, and TextMeshPro.
